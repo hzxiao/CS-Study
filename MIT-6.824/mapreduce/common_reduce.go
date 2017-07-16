@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sort"
 )
 
 // doReduce manages one reduce task: it reads the intermediate
@@ -58,6 +59,8 @@ func doReduce(
 	defer file.Close()
 	enc := json.NewEncoder(file)
 
+	kvMap := make(map[string][]string)
+	var keys []string
 	for i := 0; i < nMap; i++ {
 		reduceFileName := reduceName(jobName, i, reduceTaskNumber)
 		reduceFile, err := os.Open(reduceFileName)
@@ -65,7 +68,6 @@ func doReduce(
 			log.Fatalf("doReduce-> open intermadiate file error: %v\n", err)
 		}
 		dec := json.NewDecoder(reduceFile)
-		kvMap := make(map[string][]string)
 		var kv KeyValue
 		for {
 			if err = dec.Decode(&kv); err == io.EOF {
@@ -73,15 +75,20 @@ func doReduce(
 			} else if err != nil {
 				log.Fatalf("doReduce-> decode json file error: %v\n", err)
 			}
+			if _, found := kvMap[kv.Key]; !found {
+				keys = append(keys, kv.Key)
+			}
 			kvMap[kv.Key] = append(kvMap[kv.Key], kv.Value)
 		}
 		reduceFile.Close()
+	}
 
-		for k, v := range kvMap {
-			err = enc.Encode(KeyValue{k, reduceF(k, v)})
-			if err != nil {
-				log.Fatalf("doReduce-> encode json file error: %v\n", err)
-			}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		err = enc.Encode(KeyValue{k, reduceF(k, kvMap[k])})
+		if err != nil {
+			log.Fatalf("doReduce-> encode json file error: %v\n", err)
 		}
 	}
 }
