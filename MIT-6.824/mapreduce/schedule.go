@@ -35,7 +35,7 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 	var wg sync.WaitGroup
 	wg.Add(ntasks)
-	var workChan = make(chan string, 10)
+	var workChan = make(chan string)
 	//loop read new worker that entry
 	go func() {
 		for {
@@ -51,8 +51,8 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 			fmt.Printf("Schedule: RPC %v call ToTask fail.\n", address)
 			taskChan <- arg
 		} else {
-			workChan <- address
 			wg.Done()
+			workChan <- address
 		}
 	}
 	go func() {
