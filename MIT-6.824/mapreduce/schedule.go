@@ -34,8 +34,8 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	// TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
 	//
 	var wg sync.WaitGroup
-
-	var workChan = make(chan string)
+	wg.Add(ntasks)
+	var workChan = make(chan string, 10)
 	//loop read new worker that entry
 	go func() {
 		for {
@@ -44,27 +44,33 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 		}
 	}()
 
-	for i := 0; i < ntasks; i++ {
-		workerAddr := <-workChan
-		go func(c int, wkAddr string) {
-			wg.Add(1)
-
-			fmt.Printf("Schedule: the task #%v of %v phase running on worker %v.\n",
-				c, phase, wkAddr)
-			arg := &DoTaskArgs{
-				JobName:       jobName,
-				File:          mapFiles[c],
-				Phase:         phase,
-				TaskNumber:    c,
-				NumOtherPhase: n_other,
-			}
-			ok := call(wkAddr, "Worker.DoTask", arg, nil)
-			if !ok {
-				fmt.Printf("Schedule: RPC %v call ToTask error.\n", wkAddr)
-			}
+	var taskChan = make(chan *DoTaskArgs)
+	rpc := func(address string, arg *DoTaskArgs, reply interface{}) {
+		ok := call(address, "Worker.DoTask", arg, reply)
+		if !ok {
+			fmt.Printf("Schedule: RPC %v call ToTask fail.\n", address)
+			taskChan <- arg
+		} else {
+			workChan <- address
 			wg.Done()
-			workChan <- wkAddr
-		}(i, workerAddr)
+		}
+	}
+	go func() {
+		for {
+			wk := <-workChan
+			arg := <-taskChan
+			go rpc(wk, arg, nil)
+		}
+	}()
+	for i := 0; i < ntasks; i++ {
+		arg := &DoTaskArgs{
+			JobName:       jobName,
+			File:          mapFiles[i],
+			Phase:         phase,
+			TaskNumber:    i,
+			NumOtherPhase: n_other,
+		}
+		taskChan <- arg
 	}
 
 	wg.Wait()
