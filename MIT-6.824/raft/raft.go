@@ -18,6 +18,8 @@ package raft
 //
 
 import (
+	"bytes"
+	"encoding/gob"
 	"github.com/hzxiao/CS-Study/MIT-6.824/labrpc"
 	"math/rand"
 	"sync"
@@ -117,12 +119,13 @@ func (rf *Raft) getLastTerm() int {
 func (rf *Raft) persist() {
 	// Your code here (2C).
 	// Example:
-	// w := new(bytes.Buffer)
-	// e := gob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.log)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 //
@@ -131,13 +134,14 @@ func (rf *Raft) persist() {
 func (rf *Raft) readPersist(data []byte) {
 	// Your code here (2C).
 	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := gob.NewDecoder(r)
-	// d.Decode(&rf.xxx)
-	// d.Decode(&rf.yyy)
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
+	r := bytes.NewBuffer(data)
+	d := gob.NewDecoder(r)
+	d.Decode(&rf.votedFor)
+	d.Decode(&rf.currentTerm)
+	d.Decode(&rf.log)
 }
 
 type AppendEntriesArgs struct {
@@ -158,6 +162,8 @@ type AppendEntriesReply struct {
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
+
 	DPrintf("[AppendEntries] s:%v-t:%v ----> s:%v-t:%v", args.LeaderID, args.Term, rf.me, rf.currentTerm)
 	reply.Success = false
 	if args.Term < rf.currentTerm {
@@ -217,6 +223,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	}
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	if rf.state != StateLeader {
 		return ok
@@ -317,6 +324,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
+
 	DPrintf("[RV] s:%v-t:%v -----> s:%v-t:%v", args.CandidateID, args.Term, rf.me, rf.currentTerm)
 	reply.VoteGranted = false
 	if args.Term < rf.currentTerm {
@@ -398,6 +407,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 		rf.state = StateFollower
 		rf.votedFor = -1
 		rf.votedCount = 0
+		rf.persist()
 	}
 	if reply.VoteGranted {
 		rf.votedCount++
@@ -533,6 +543,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 						rf.nextIndex[i] = rf.getLastIndex() + 1
 						rf.matchIndex[i] = 0
 					}
+					rf.persist()
 					rf.mu.Unlock()
 				}
 			case StateLeader:
